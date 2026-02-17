@@ -1,5 +1,6 @@
 
 import re
+import json
 import cv2
 import torch
 import numpy as np
@@ -10,9 +11,13 @@ import albumentations as A
 from PIL import Image
 from pathlib import Path
 from datasets import register
+from datasets.preprocess import parse_background_color, resize_with_aspect_and_gray_padding
 from torchvision import transforms
 from torch.utils.data import Dataset
-from skimage.feature import local_binary_pattern
+try:
+    from skimage.feature import local_binary_pattern
+except ModuleNotFoundError:
+    local_binary_pattern = None
 
 def resize_fn(img, size):
     return transforms.ToTensor()(
@@ -31,18 +36,20 @@ class SR_paired_images_wrapper_lp(Dataset):
             lbp = False,
             EIR = False,
             test = False,
+            preprocessed = False,
             dataset=None,
             ):
         
         self.imgW = imgW
         self.imgH = imgH
-        self.background = eval(background)
+        self.background = parse_background_color(background)
         self.dataset = dataset
         self.aug = aug
         self.ar = image_aspect_ratio
         self.lbp = lbp
         self.EIR = EIR
         self.test = test
+        self.preprocessed = preprocessed
         
         self.transform = np.array([
                 A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, brightness_by_max=True, always_apply=True, p=1.0),
@@ -60,52 +67,32 @@ class SR_paired_images_wrapper_lp(Dataset):
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
     
-    def padding(self, img, min_ratio, max_ratio, color = (0, 0, 0)):
-        img_h, img_w = np.shape(img)[:2]
-
-        border_w = 0
-        border_h = 0
-        ar = float(img_w)/img_h
-
-        if ar >= min_ratio and ar <= max_ratio:
-            return img, border_w, border_h
-
-        if ar < min_ratio:
-            while ar < min_ratio:
-                border_w += 1
-                ar = float(img_w+border_w)/(img_h+border_h)
-        else:
-            while ar > max_ratio:
-                border_h += 1
-                ar = float(img_w)/(img_h+border_h)
-
-        border_w = border_w//2
-        border_h = border_h//2
-
-        img = cv2.copyMakeBorder(img, border_h, border_h, border_w, border_w, cv2.BORDER_CONSTANT, value = color)
-        return img, border_w, border_h
-    
     def extract_plate_numbers(self, file_path, pattern):
-        # List to store extracted plate numbers
-        plate_numbers = []
-        
-        # Open the text file
-        with open(file_path, 'r') as file:
-            # Iterate over each line in the file
-            for line in file:
-                # Search for the pattern in the current line
-                matches = re.search(pattern, line)
-                # If a match is found
-                if matches:
-                    # Extract the matched string
-                    plate_number = matches.group(1)
-                    # Add the extracted plate number to the list
-                    plate_numbers.append(plate_number)
-        
-        # Return the list of extracted plate numbers
-        return plate_numbers[0]
+        if Path(file_path).exists():
+            plate_numbers = []
+            with open(file_path, "r", encoding="utf-8") as file:
+                for line in file:
+                    matches = re.search(pattern, line)
+                    if matches:
+                        plate_numbers.append(matches.group(1))
+            if plate_numbers:
+                return plate_numbers[0]
+
+        # Fallback for Pa7a3Hin raw-train structure:
+        # .../track_x/hr-003.jpg -> .../track_x/annotations.json
+        ann_path = Path(file_path).parent / "annotations.json"
+        if ann_path.exists():
+            with open(ann_path, "r", encoding="utf-8") as f:
+                ann = json.load(f)
+            plate = ann.get("plate_text", "")
+            if plate:
+                return plate
+
+        raise FileNotFoundError(f"Label not found for sample. txt={file_path}, ann={ann_path}")
     
     def get_lbp(self, x):
+        if local_binary_pattern is None:
+            raise ModuleNotFoundError("scikit-image is required for LBP features.")
         radius = 2
         n_points = 8 * radius
         METHOD = 'uniform'
@@ -130,13 +117,32 @@ class SR_paired_images_wrapper_lp(Dataset):
                 augment = np.random.choice(self.transform, replace = True)
                 if augment is not None:
                     lr = augment(image=lr)["image"]
-            
-            lr, _, _ = self.padding(lr, self.ar-0.15, self.ar+0.15, self.background)
-            lr = resize_fn(lr, (self.imgH, self.imgW))
-            hr = K.enhance.equalize_clahe(transforms.ToTensor()(Image.fromarray(hr)).unsqueeze(0), clip_limit=4.0, grid_size=(2, 2))
-            hr = K.utils.tensor_to_image(hr.mul(255.0).byte())
-            hr, _, _ = self.padding(hr, self.ar-0.15, self.ar+0.15, self.background)  
-            hr = resize_fn(hr, (2*self.imgH, 2*self.imgW))
+
+            if self.preprocessed:
+                # Offline preprocessed path: images are already standardized.
+                if lr.shape[:2] != (self.imgH, self.imgW):
+                    lr = cv2.resize(lr, (self.imgW, self.imgH), interpolation=cv2.INTER_CUBIC)
+                if hr.shape[:2] != (2 * self.imgH, 2 * self.imgW):
+                    hr = cv2.resize(hr, (2 * self.imgW, 2 * self.imgH), interpolation=cv2.INTER_CUBIC)
+                lr = transforms.ToTensor()(Image.fromarray(lr))
+                hr = transforms.ToTensor()(Image.fromarray(hr))
+            else:
+                lr = resize_with_aspect_and_gray_padding(
+                    lr,
+                    out_h=self.imgH,
+                    out_w=self.imgW,
+                    gray_color=self.background,
+                )
+                lr = resize_fn(lr, (self.imgH, self.imgW))
+                hr = K.enhance.equalize_clahe(transforms.ToTensor()(Image.fromarray(hr)).unsqueeze(0), clip_limit=4.0, grid_size=(2, 2))
+                hr = K.utils.tensor_to_image(hr.mul(255.0).byte())
+                hr = resize_with_aspect_and_gray_padding(
+                    hr,
+                    out_h=2 * self.imgH,
+                    out_w=2 * self.imgW,
+                    gray_color=self.background,
+                )
+                hr = resize_fn(hr, (2 * self.imgH, 2 * self.imgW))
             
             lrs.append(lr)
             hrs.append(hr)

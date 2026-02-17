@@ -308,8 +308,6 @@ class ResidualConcatenationBlock(nn.Module):
         for i in range(1, self.num_layers+1):
             x = torch.cat((self.block[i-1](x), x), dim=1)
             x = self.pw[i-1](x)
-        x = nn.Conv2d(x.shape[1], self.out_channels, kernel_size=1, stride=1, padding=0, bias=False).cuda()(x)
-        
         return x
 
 class ResidualModule(nn.Module):
@@ -378,7 +376,19 @@ class Cgnet(nn.Module):
         
         output = self.Output(PS1)
         output = output[:, :, :orig_h, :orig_w]
-        output = F.sigmoid(output + F.interpolate( x, (orig_h, orig_w), mode='bicubic'))
+        # Residual branch expects RGB skip. For multi-frame inputs (e.g., 15ch),
+        # use the center RGB triplet as the skip connection.
+        if x.size(1) == output.size(1):
+            skip = x
+        elif x.size(1) > output.size(1) and x.size(1) % output.size(1) == 0:
+            group = x.size(1) // output.size(1)
+            center = group // 2
+            start = center * output.size(1)
+            skip = x[:, start:start + output.size(1), :, :]
+        else:
+            skip = x[:, :output.size(1), :, :]
+
+        output = torch.sigmoid(output + F.interpolate(skip, (orig_h, orig_w), mode='bicubic'))
         
         return output
              

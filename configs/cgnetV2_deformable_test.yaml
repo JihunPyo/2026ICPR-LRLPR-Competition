@@ -24,7 +24,6 @@ test_dataset:
       imgH: 16
       aug: False
       image_aspect_ratio: 3
-      background: (0.5, 0.5, 0.5)
+      background: (127, 127, 127)
       test: True
   batch: 2
-

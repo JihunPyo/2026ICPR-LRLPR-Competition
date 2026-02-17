@@ -468,6 +468,7 @@ class LPR_model(nn.Module):
 
     def forward(self, input, isTsne=False, isVis=False, isSAVis=False, isCNN=False):
         conv_out,_ = self.encoder(input)
+        enc_slf_attn = None
         if self.isSeqModel:
             b, c, h, w = conv_out.shape
             conv_out = conv_out.permute(0, 1, 3, 2)

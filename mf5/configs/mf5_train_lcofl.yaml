@@ -1,0 +1,68 @@
+seed: 1996
+
+data:
+  root: ./data
+  val_ratio: 0.1
+  scenario_filter: null
+  layout_filter: null
+
+preprocess:
+  input_mode: stack15
+  imgW: 48
+  imgH: 16
+  aug: true
+  image_aspect_ratio: 3
+  background: (127, 127, 127)
+
+model:
+  name: cgnetV2_deformable
+  args:
+    in_channels: 15
+    out_channels: 3
+  checkpoint: null
+
+loss:
+  l1_weight: 1.0
+  ssim_weight: 0.25
+  ssim_window: 5
+  pixel_weight: 1.0
+  lcofl_weight: 0.75
+  confusion_matrix:
+    enabled: false
+    threshold: 0.25
+    pair_weight: 0.5
+
+ocr:
+  ocr_ckpt: /data/pjh7639/lpsr-lacd/save/gplpr_competition/best_gplpr.pth
+  ocr_train: false
+  layout_alpha: 1.0
+  alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  nc: 3
+  k: 7
+  is_seq_model: true
+  head: 2
+  inner: 256
+  is_l2_norm: true
+
+train:
+  epochs: 40
+  batch_size: 32
+  val_batch_size: 32
+  num_workers: 8
+  lr: 1.0e-4
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  lr_step: 10
+  lr_gamma: 0.5
+  amp: true
+  update_mode: avg5_once
+  resume: null
+  save_dir: ./save/mf5_15ch_lcofl
+
+wandb:
+  enabled: true
+  project: lpr-mf5
+  entity: pyojihun80-kyung-hee-university
+  run_name: mf5-15ch-lcofl
+  mode: online
+  dir: null

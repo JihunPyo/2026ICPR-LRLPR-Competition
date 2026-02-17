@@ -102,6 +102,14 @@ class strLabelConverter(object):
             # NOTE: 0 is reserved for 'blank' required by wrap_ctc
             self.dict[char] = i
 
+    def _normalize_text(self, item):
+        if isinstance(item, bytes):
+            item = item.decode('utf-8', 'strict')
+        else:
+            item = str(item)
+        # Remove surrounding/inner whitespace that appears in a few annotations.
+        return item.strip().replace(' ', '')
+
     def encode(self, text):
         """Support batch or single str.
 
@@ -115,17 +123,13 @@ class strLabelConverter(object):
 
         length = []
         result = []
-        decode_flag = True if type(text[0])==bytes else False
-        print('decode_flag')
         for item in text:
-
-            if decode_flag:
-                item = item.decode('utf-8','strict')
+            item = self._normalize_text(item)
             length.append(len(item))
             if len(item)<1:
                 continue
             for char in item:
-                index = self.dict[char]
+                index = self.dict.get(char, 0)
                 result.append(index)
         text = result
         return (torch.IntTensor(text), torch.IntTensor(length))
@@ -148,17 +152,14 @@ class strLabelConverter(object):
         
         length = []
         all_result = []
-        decode_flag = True if type(text[0])==bytes else False
-
         for item in text:
             result = []
-            if decode_flag:
-                item = item.decode('utf-8','strict')
+            item = self._normalize_text(item)
             length.append(len(item))
             for i in range(K):
                 if i<len(item): 
                     char = item[i]
-                    index = self.dict[char]
+                    index = self.dict.get(char, 0)
                     result.append(index)
                 else:
                     result.append(0)

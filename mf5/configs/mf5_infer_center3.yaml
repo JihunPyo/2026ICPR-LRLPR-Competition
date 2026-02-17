@@ -1,0 +1,14 @@
+data:
+  root: ./data
+
+preprocess:
+  input_mode: center3
+  imgW: 48
+  imgH: 16
+  image_aspect_ratio: 3
+  background: (127, 127, 127)
+
+infer:
+  batch_size: 64
+  num_workers: 8
+  save_dir: ./save/mf5_center3_test_public

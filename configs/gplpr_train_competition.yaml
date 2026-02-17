@@ -1,0 +1,67 @@
+MODEL_OCR:
+  name: GPLPR
+  args:
+    alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    nc: 3
+    K: 7
+    isSeqModel: True
+    head: 2
+    inner: 256
+    isl2Norm: True
+
+optimizer_ocr:
+  name: adam
+  args:
+    lr: 1.0e-4
+
+alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+train_dataset:
+  dataset:
+    name: parallel_training
+    args:
+      path_split: ./split_all_rodosol_preprocessed.txt
+      phase: training
+  wrapper:
+    name: parallel_images_lp
+    args:
+      imgW: 48
+      imgH: 16
+      aug: True
+      image_aspect_ratio: 3
+      background: (127, 127, 127)
+      preprocessed: True
+  batch: 64
+  num_workers: 8
+
+val_dataset:
+  dataset:
+    name: parallel_training
+    args:
+      path_split: ./split_all_rodosol_preprocessed.txt
+      phase: validation
+  wrapper:
+    name: parallel_images_lp
+    args:
+      imgW: 48
+      imgH: 16
+      aug: False
+      image_aspect_ratio: 3
+      background: (127, 127, 127)
+      preprocessed: True
+  batch: 64
+  num_workers: 8
+
+train:
+  epochs: 40
+  lr_step: 10
+  lr_gamma: 0.5
+  save_dir: ./save/gplpr_competition
+
+wandb:
+  enabled: true
+  project: lpr-mf5
+  entity: pyojihun80-kyung-hee-university
+  run_name: gplpr-competition
+  mode: online
+  dir: null

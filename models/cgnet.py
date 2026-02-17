@@ -248,8 +248,6 @@ class ResidualConcatenationBlock(nn.Module):
         for i in range(1, self.num_layers+1):
             x = torch.cat((self.block[i-1](x), x), dim=1)
             x = self.pw[i-1](x)
-        x = nn.Conv2d(x.shape[1], self.out_channels, kernel_size=1, stride=1, padding=0, bias=False).cuda()(x) #
-        
         return x
 
 class ResidualModule(nn.Module):

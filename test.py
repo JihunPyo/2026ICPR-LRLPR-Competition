@@ -14,14 +14,28 @@ from tqdm import tqdm
 from PIL import Image
 from pathlib import Path
 from Levenshtein import distance
-from train import make_dataloader
 from matplotlib import pyplot as plt
+from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import kornia as K
 torch.autograd.set_detect_anomaly(True)
 torch.cuda.empty_cache()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+
+def make_dataloader(spec, tag=''):
+    dataset = datasets.make(spec['dataset'])
+    dataset = datasets.make(spec['wrapper'], args={'dataset': dataset})
+    loader = DataLoader(
+        dataset,
+        batch_size=spec['batch'],
+        shuffle=(tag == 'train'),
+        num_workers=spec.get('num_workers', 0),
+        pin_memory=torch.cuda.is_available(),
+        collate_fn=dataset.collate_fn,
+    )
+    return loader
 
 def prepare_testing():
     # Create a data loader for the test dataset
