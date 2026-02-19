@@ -687,9 +687,9 @@ def parse_args():
         help="Per-stage validation split ratio by track.",
     )
 
-    p.add_argument("--stage1-a-tracks", type=int, default=10000)
-    p.add_argument("--stage1-b-tracks", type=int, default=5000)
-    p.add_argument("--stage2-b-tracks", type=int, default=5000)
+    p.add_argument("--stage1-a-tracks", type=int, default=9000)
+    p.add_argument("--stage1-b-tracks", type=int, default=4500)
+    p.add_argument("--stage2-b-tracks", type=int, default=4500)
 
     p.add_argument("--all-frames", type=str2bool, default=True, help="Use all 5 frames per track.")
     p.add_argument("--frame-index", type=int, default=3, choices=[1, 2, 3, 4, 5], help="Used if all_frames=false.")

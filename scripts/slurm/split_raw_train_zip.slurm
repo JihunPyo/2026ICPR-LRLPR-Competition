@@ -34,8 +34,9 @@ PY_RUN=(conda run --no-capture-output -n googlenet python -u)
 PROJECT_DIR="${PROJECT_DIR:-/data/pjh7639/lpsr-lacd}"
 RAW_TRAIN_ZIP="${RAW_TRAIN_ZIP:-/data/pjh7639/datasets/raw-train.zip}"
 RAW_TRAIN_VAL_ZIP="${RAW_TRAIN_VAL_ZIP:-/data/pjh7639/datasets/raw-train-trainval.zip}"
-RAW_TRAIN_TEST_ZIP="${RAW_TRAIN_TEST_ZIP:-/data/pjh7639/datasets/raw-train_test.zip}"
+RAW_TRAIN_TEST_ZIP="${RAW_TRAIN_TEST_ZIP:-/data/pjh7639/datasets/raw-train-test.zip}"
 TEST_RATIO="${TEST_RATIO:-0.1}"
+TEST_SCENARIO="${TEST_SCENARIO:-B}"
 SEED="${SEED:-1996}"
 OVERWRITE="${OVERWRITE:-1}"
 STRICT="${STRICT:-1}"
@@ -112,7 +113,7 @@ if [[ "${STAGE_TO_LOCAL}" == "1" ]]; then
   EFFECTIVE_INPUT_ZIP="${LOCAL_RAW_DIR}/$(basename "${RAW_TRAIN_ZIP}")"
 
   LOCAL_VAL_ZIP="${LOCAL_OUT_DIR}/raw-train-trainval.zip"
-  LOCAL_TEST_ZIP="${LOCAL_OUT_DIR}/raw-train_test.zip"
+  LOCAL_TEST_ZIP="${LOCAL_OUT_DIR}/raw-train-test.zip"
   LOCAL_MANIFEST="${LOCAL_OUT_DIR}/raw-train_split_manifest.json"
   LOCAL_VAL_LIST="${LOCAL_OUT_DIR}/raw-train_val_tracks.txt"
   LOCAL_TEST_LIST="${LOCAL_OUT_DIR}/raw-train_test_tracks.txt"
@@ -130,6 +131,7 @@ echo "[INFO] input zip: ${EFFECTIVE_INPUT_ZIP}"
 echo "[INFO] out val zip: ${RAW_TRAIN_VAL_ZIP}"
 echo "[INFO] out test zip: ${RAW_TRAIN_TEST_ZIP}"
 echo "[INFO] test ratio: ${TEST_RATIO}"
+echo "[INFO] test scenario: ${TEST_SCENARIO}"
 echo "[INFO] seed: ${SEED}"
 echo "[INFO] overwrite: ${OVERWRITE}"
 echo "[INFO] strict: ${STRICT}"
@@ -144,6 +146,7 @@ export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
   --out-val-zip "${LOCAL_VAL_ZIP}" \
   --out-test-zip "${LOCAL_TEST_ZIP}" \
   --test-ratio "${TEST_RATIO}" \
+  --test-scenario "${TEST_SCENARIO}" \
   --seed "${SEED}" \
   --manifest-json "${LOCAL_MANIFEST}" \
   --val-track-list "${LOCAL_VAL_LIST}" \

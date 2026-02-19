@@ -49,10 +49,16 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--out-test-zip",
-        default="/data/pjh7639/datasets/raw-train_test.zip",
+        default="/data/pjh7639/datasets/raw-train-test.zip",
         help="Output test zip path (10%% by default)",
     )
     p.add_argument("--test-ratio", type=float, default=0.1, help="Test split ratio by track")
+    p.add_argument(
+        "--test-scenario",
+        default="B",
+        choices=["ALL", "A", "B"],
+        help="Which scenario pool is used for test split target/allocation",
+    )
     p.add_argument("--seed", type=int, default=1996, help="Random seed")
     p.add_argument(
         "--manifest-json",
@@ -354,6 +360,7 @@ def stratified_split(
     valid_tracks: Dict[str, TrackRecord],
     test_ratio: float,
     seed: int,
+    test_scenario: str,
 ) -> Tuple[set, set, dict]:
     total_tracks = len(valid_tracks)
     if total_tracks <= 0:
@@ -361,11 +368,24 @@ def stratified_split(
     if not (0.0 <= test_ratio <= 1.0):
         raise ValueError(f"test_ratio must be in [0, 1], got: {test_ratio}")
 
-    target_test = max(1, int(total_tracks * test_ratio))
-    target_test = min(target_test, total_tracks)
+    test_scenario = test_scenario.upper()
+    if test_scenario not in {"ALL", "A", "B"}:
+        raise ValueError(f"Unsupported test_scenario: {test_scenario}")
+
+    candidate_tracks: Dict[str, TrackRecord] = {}
+    for track_id, rec in valid_tracks.items():
+        if test_scenario == "ALL" or rec.scenario_key == test_scenario:
+            candidate_tracks[track_id] = rec
+
+    candidate_total = len(candidate_tracks)
+    if candidate_total <= 0:
+        raise RuntimeError(f"No candidate tracks for test_scenario={test_scenario}")
+
+    target_test = max(1, int(candidate_total * test_ratio))
+    target_test = min(target_test, candidate_total)
 
     strata_to_tracks: Dict[Tuple[str, str], List[str]] = {}
-    for track_id, rec in valid_tracks.items():
+    for track_id, rec in candidate_tracks.items():
         strata_to_tracks.setdefault(rec.stratum_key, []).append(track_id)
 
     strata_sizes = {k: len(v) for k, v in strata_to_tracks.items()}
@@ -409,6 +429,8 @@ def stratified_split(
 
     split_summary = {
         "total_tracks": total_tracks,
+        "test_scenario": test_scenario,
+        "candidate_tracks": candidate_total,
         "target_test_tracks": target_test,
         "actual_test_tracks": len(test_tracks),
         "actual_val_tracks": len(val_tracks),
@@ -532,6 +554,7 @@ def main() -> int:
             valid_tracks=valid_tracks,
             test_ratio=args.test_ratio,
             seed=args.seed,
+            test_scenario=args.test_scenario,
         )
 
         written_stats = write_split_zips(
@@ -557,6 +580,7 @@ def main() -> int:
         },
         "params": {
             "test_ratio": args.test_ratio,
+            "test_scenario": args.test_scenario,
             "seed": args.seed,
             "overwrite": int(overwrite),
             "strict": int(strict),
@@ -584,6 +608,7 @@ def main() -> int:
     print(f"[INFO] manifest: {manifest_path.as_posix()}")
     print(
         f"[INFO] tracks total={manifest['split']['summary']['total_tracks']} "
+        f"candidate={manifest['split']['summary']['candidate_tracks']} "
         f"val={manifest['split']['summary']['actual_val_tracks']} "
         f"test={manifest['split']['summary']['actual_test_tracks']}"
     )
