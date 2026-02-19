@@ -58,3 +58,4 @@ echo "[INFO] local config saved: ${LOCAL_CONFIG}"
 
 echo "[INFO] start training with local staged dataset"
 conda run -n googlenet python -m train_gplpr --config "${LOCAL_CONFIG}"
+``
