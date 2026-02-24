@@ -171,6 +171,7 @@ class TrackSequenceWrapper(Dataset):
         self.background = parse_background_color(background)
         self.phase = phase
         self.input_mode = input_mode
+        self.expected_in_channels = self._resolve_expected_channels(input_mode)
 
         # Keep the same augmentation family as the original wrapper.
         self.transforms = [
@@ -198,6 +199,15 @@ class TrackSequenceWrapper(Dataset):
                 A.RandomGamma(gamma_limit=(80, 120), eps=None, always_apply=True, p=1.0),
                 None,
             ]
+
+    @staticmethod
+    def _resolve_expected_channels(input_mode: str) -> int:
+        mode = str(input_mode).lower()
+        if mode == "stack15":
+            return 15
+        if mode == "center3":
+            return 3
+        raise ValueError(f"Unsupported preprocess.input_mode: {input_mode}")
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -260,6 +270,11 @@ class TrackSequenceWrapper(Dataset):
             lr_input = lr_tensors[2]
         else:
             lr_input = torch.cat(lr_tensors, dim=0)
+        if lr_input.shape[0] != self.expected_in_channels:
+            raise RuntimeError(
+                f"Unexpected LR channels: got {lr_input.shape[0]}, "
+                f"expected {self.expected_in_channels} for input_mode={self.input_mode}"
+            )
 
         out = {
             "lr": lr_input,

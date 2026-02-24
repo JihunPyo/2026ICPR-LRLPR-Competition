@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=29G
 #SBATCH -p batch_ugrad
-#SBATCH -t 0-12:00:00
+#SBATCH -t 1-00:00:00
 #SBATCH -o slurm-%A.bootstrap.out
 
 set -euo pipefail
@@ -45,11 +45,14 @@ fi
 # 기본값은 sbatch를 실행한 디렉토리(레포 루트)로 둔다.
 PROJECT_DIR="${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 NAS_DATA_ROOT="/data/pjh7639/datasets"
-RAW_TRAIN_ZIP="${NAS_DATA_ROOT}/raw-train.zip"
-RAW_TEST_ZIP="${NAS_DATA_ROOT}/raw-test-public.zip"
-PRETRAINED_CKPT="/data/pjh7639/datasets/best_model_cgnetV2_deformable_Epoch_82.pth"
-OCR_CKPT="/data/pjh7639/lpsr-lacd/save/gplpr_competition/best_gplpr.pth"
-NAS_OUT_ROOT="/data/pjh7639/datasets/mf5_runs"
+RAW_TRAIN_ZIP="${RAW_TRAIN_ZIP:-${NAS_DATA_ROOT}/raw-train-trainval.zip}"
+RAW_TEST_ZIP="${RAW_TEST_ZIP:-${NAS_DATA_ROOT}/raw-train-test.zip}"  # optional for this script
+TEMPLATE_CFG="${TEMPLATE_CFG:-${PROJECT_DIR}/mf5/configs/mf5_train.yaml}"  # legacy bootstrap(hybrid)
+PRETRAINED_CKPT="${PRETRAINED_CKPT:-/data/pjh7639/weights/LCDNet/runs/lcdnet_2stage_exp01/stage2/best_model_cgnetV2_deformable_Epoch_8.pth}"
+OCR_CKPT="${OCR_CKPT:-}"  # optional: only needed for OCR eval or OCR-based template
+WEIGHTS_ROOT="/data/pjh7639/weights/mf5"
+LOGS_ROOT="/data/pjh7639/logs"
+EXP_TAG="${EXP_TAG:-mf5_legacy_bootstrap}"
 RUN_OCR_EVAL="${RUN_OCR_EVAL:-0}"  # 0: skip (default), 1: run val OCR eval after training
 
 LOCAL_BASE_DEFAULT="/local_datasets/pjh7639"
@@ -66,20 +69,30 @@ LOCAL_ROOT="${LOCAL_BASE}/lpr_mf5_${SLURM_JOB_ID}"
 LOCAL_RAW_DIR="${LOCAL_ROOT}/raw"
 LOCAL_DATA_DIR="${LOCAL_ROOT}/data"
 RUNTIME_CFG="${LOCAL_ROOT}/mf5_train.runtime.yaml"
-RUN_OUT_DIR="${NAS_OUT_ROOT}/mf5_${SLURM_JOB_ID}"
-RUN_CFG_COPY="${RUN_OUT_DIR}/mf5_train.runtime.yaml"
-EVAL_OUT_DIR="${RUN_OUT_DIR}/val_ocr_eval"
+JOB_ID="${SLURM_JOB_ID:-manual}"
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+RUN_ID="${JOB_ID}_${TIMESTAMP}"
+RUN_WEIGHTS_DIR="${WEIGHTS_ROOT}/${EXP_TAG}/${RUN_ID}"
+RUN_LOG_DIR="${LOGS_ROOT}/${EXP_TAG}/${RUN_ID}"
+RUN_CFG_COPY="${RUN_LOG_DIR}/mf5_train.runtime.yaml"
+EVAL_OUT_DIR="${RUN_LOG_DIR}/val_ocr_eval"
 
-mkdir -p "${PROJECT_DIR}/logs"
-mkdir -p "${LOCAL_RAW_DIR}" "${LOCAL_DATA_DIR}" "${RUN_OUT_DIR}"
+mkdir -p "${RUN_LOG_DIR}"
+mkdir -p "${LOCAL_RAW_DIR}" "${LOCAL_DATA_DIR}" "${RUN_WEIGHTS_DIR}"
 
 # 메인 로그는 프로젝트 logs 디렉토리로 남긴다.
-LOG_FILE="${PROJECT_DIR}/logs/slurm-${SLURM_JOB_ID}.out"
+LOG_FILE="${RUN_LOG_DIR}/slurm-${SLURM_JOB_ID}.out"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[INFO] log file: ${LOG_FILE}"
 echo "[INFO] project dir: ${PROJECT_DIR}"
-echo "[INFO] run output dir: ${RUN_OUT_DIR}"
+echo "[INFO] experiment tag: ${EXP_TAG}"
+echo "[INFO] run id: ${RUN_ID}"
+echo "[INFO] run weights dir: ${RUN_WEIGHTS_DIR}"
+echo "[INFO] run logs dir: ${RUN_LOG_DIR}"
 echo "[INFO] local base dir: ${LOCAL_BASE}"
+echo "[INFO] template cfg: ${TEMPLATE_CFG}"
+echo "[INFO] pretrained ckpt: ${PRETRAINED_CKPT}"
+echo "[INFO] ocr ckpt: ${OCR_CKPT:-<unset>}"
 echo "[INFO] RUN_OCR_EVAL: ${RUN_OCR_EVAL}"
 echo "[INFO] host: $(hostname)"
 echo "[INFO] user: $(whoami)"
@@ -96,44 +109,69 @@ if [[ ! -w "${LOCAL_BASE}" ]]; then
   exit 1
 fi
 
-for required_file in "${RAW_TRAIN_ZIP}" "${RAW_TEST_ZIP}" "${PRETRAINED_CKPT}" "${OCR_CKPT}"; do
+for required_file in "${RAW_TRAIN_ZIP}" "${PRETRAINED_CKPT}" "${TEMPLATE_CFG}"; do
   if [[ ! -f "${required_file}" ]]; then
     echo "[ERROR] required file not found: ${required_file}"
     exit 1
   fi
 done
+if [[ ! -f "${RAW_TEST_ZIP}" ]]; then
+  echo "[WARN] optional test zip not found: ${RAW_TEST_ZIP}"
+  echo "[WARN] bootstrap training continues without test-public staging."
+fi
+
+if [[ "${RUN_OCR_EVAL}" == "1" ]]; then
+  if [[ -z "${OCR_CKPT}" || ! -f "${OCR_CKPT}" ]]; then
+    echo "[ERROR] RUN_OCR_EVAL=1 requires valid OCR_CKPT. current: ${OCR_CKPT:-<unset>}"
+    exit 1
+  fi
+fi
 
 # 3. 로컬 SSD로 데이터 복사 후 압축 해제
 cp "${RAW_TRAIN_ZIP}" "${LOCAL_RAW_DIR}/"
-cp "${RAW_TEST_ZIP}" "${LOCAL_RAW_DIR}/"
+HAS_TEST_ZIP=0
+if [[ -f "${RAW_TEST_ZIP}" ]]; then
+  cp "${RAW_TEST_ZIP}" "${LOCAL_RAW_DIR}/"
+  HAS_TEST_ZIP=1
+fi
 cd "${LOCAL_RAW_DIR}"
-unzip -q -o raw-train.zip
-unzip -q -o raw-test-public.zip
+unzip -q -o "$(basename "${RAW_TRAIN_ZIP}")"
+if [[ "${HAS_TEST_ZIP}" == "1" ]]; then
+  unzip -q -o "$(basename "${RAW_TEST_ZIP}")"
+fi
 
 # 4. 학습 코드가 기대하는 구조(data/train, data/test-public)로 정렬
 TRAIN_PARENT="$(dirname "$(find "${LOCAL_RAW_DIR}" -type d -name 'Scenario-A' | head -n1)")"
-TEST_PARENT="$(dirname "$(dirname "$(find "${LOCAL_RAW_DIR}" -type f -name 'lr-001.jpg' | head -n1)")")"
-if [[ -z "${TRAIN_PARENT}" || -z "${TEST_PARENT}" ]]; then
-  echo "[ERROR] failed to detect train/test roots after unzip."
+if [[ -z "${TRAIN_PARENT}" ]]; then
+  echo "[ERROR] failed to detect train root after unzip."
   exit 1
 fi
 ln -sfn "${TRAIN_PARENT}" "${LOCAL_DATA_DIR}/train"
-ln -sfn "${TEST_PARENT}" "${LOCAL_DATA_DIR}/test-public"
+if [[ "${HAS_TEST_ZIP}" == "1" ]]; then
+  TEST_PARENT="$(dirname "$(dirname "$(find "${LOCAL_RAW_DIR}" -type f -name 'lr-001.jpg' | head -n1)")")"
+  if [[ -n "${TEST_PARENT}" ]]; then
+    ln -sfn "${TEST_PARENT}" "${LOCAL_DATA_DIR}/test-public"
+  else
+    echo "[WARN] failed to detect test root after unzip. skip test-public symlink."
+  fi
+fi
 
 # 5. 런타임 config 생성 (로컬 데이터 + 파인튜닝 체크포인트 반영)
 python - <<PY
 import yaml
 from pathlib import Path
 
-src = Path("${PROJECT_DIR}") / "mf5/configs/mf5_train_lcofl.yaml"
+src = Path("${TEMPLATE_CFG}")
 dst = Path("${RUNTIME_CFG}")
 cfg = yaml.safe_load(src.read_text())
 cfg["data"]["root"] = "${LOCAL_DATA_DIR}"
 cfg["model"]["checkpoint"] = "${PRETRAINED_CKPT}"
-cfg["ocr"]["ocr_ckpt"] = "${OCR_CKPT}"
-cfg["train"]["save_dir"] = "${RUN_OUT_DIR}"
+cfg["train"]["save_dir"] = "${RUN_WEIGHTS_DIR}"
+cfg["train"]["log_dir"] = "${RUN_LOG_DIR}"
 cfg["train"]["update_mode"] = "avg5_once"
 cfg["train"]["num_workers"] = 8
+if "${OCR_CKPT}" and isinstance(cfg.get("ocr"), dict):
+    cfg["ocr"]["ocr_ckpt"] = "${OCR_CKPT}"
 dst.write_text(yaml.safe_dump(cfg, sort_keys=False))
 print(f"saved runtime config: {dst}")
 PY
@@ -147,7 +185,7 @@ python -u mf5/train_mf5.py --config "${RUNTIME_CFG}"
 
 # 6-1. 학습 완료 후 검증셋 OCR 정확도 평가 (optional)
 if [[ "${RUN_OCR_EVAL}" == "1" ]]; then
-  BEST_SR_CKPT="${RUN_OUT_DIR}/best.pth"
+  BEST_SR_CKPT="${RUN_WEIGHTS_DIR}/best.pth"
   if [[ -f "${BEST_SR_CKPT}" ]]; then
     echo "[INFO] running val OCR evaluation..."
     python -u mf5/eval_val_ocr_gplpr.py \

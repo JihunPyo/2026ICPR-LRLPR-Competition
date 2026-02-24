@@ -237,9 +237,13 @@ def train_parallel(train_loader, ocr_model, sr_model, ocr_loss_fn, sr_loss_fn, o
     config = args[0]
     alphabet = config['alphabet']
     converter = strLabelConverter(alphabet)
+    ocr_train = bool(config.get('MODEL_OCR', {}).get('OCR_TRAIN', True))
     
     #set train mode for models
-    ocr_model.train()
+    if ocr_train:
+        ocr_model.train()
+    else:
+        ocr_model.eval()
     sr_model.train()
 
     train_loss = []
@@ -276,9 +280,10 @@ def train_parallel(train_loader, ocr_model, sr_model, ocr_loss_fn, sr_loss_fn, o
         loss_ocr_fake = loss_ocr_fake/(i+1)
         loss_ocr = loss_ocr_fake + loss_ocr_real
         
-        ocr_opt.zero_grad()
-        loss_ocr.backward()
-        ocr_opt.step()
+        if ocr_train and ocr_opt is not None:
+            ocr_opt.zero_grad()
+            loss_ocr.backward()
+            ocr_opt.step()
         
         # Predict on HR images ground truth
         
@@ -334,11 +339,14 @@ def train_parallel(train_loader, ocr_model, sr_model, ocr_loss_fn, sr_loss_fn, o
             save_visualized_images(image1, image2, image3, config['MODEL_SR']['name']+config['tag_view']+'.png')
             
         train_loss.append(loss_sr.detach().item())
+        loss_ocr_disp = loss_ocr.detach().item() if ocr_train else 0.0
+        loss_fake_disp = loss_ocr_fake.detach().item() if ocr_train else 0.0
+        loss_real_disp = loss_ocr_real.detach().item() if ocr_train else 0.0
         pbar.set_postfix({'loss': sum(train_loss)/len(train_loss),
-                          'loss_ocr': loss_ocr.detach().item(),
+                          'loss_ocr': loss_ocr_disp,
                           'loss_sr': loss_sr_1.detach().item(),
-                          'loss_fake': loss_ocr_fake.detach().item(),
-                          'loss_real': loss_ocr_real.detach().item()})
+                          'loss_fake': loss_fake_disp,
+                          'loss_real': loss_real_disp})
         
     return sum(train_loss)/len(train_loss)
         
@@ -465,11 +473,14 @@ def validation_parallel(val_loader, ocr_model, sr_model, ocr_loss_fn, sr_loss_fn
         if config['CM']:
             flattened_preds = np.concatenate(preds_sr_cm)
             flattened_gts = np.concatenate(preds_gt_cm)
-        
-            conf_matrix = confusion_matrix(flattened_preds, flattened_gts, labels=range(len(alphabet)))
+
+            # Include CTC blank index (0) in the confusion matrix labels to keep indices aligned.
+            class_names = '-' + alphabet
+            conf_matrix = confusion_matrix(flattened_preds, flattened_gts, labels=range(len(class_names)))
             conf_matrix_normalized = conf_matrix.astype('float') / (conf_matrix.sum(axis=1)[:, np.newaxis] + 1e-10)
-            
-            confusing_pairs = extract_confusing_pairs(conf_matrix_normalized, alphabet, 0.25)
+
+            confusing_pairs = extract_confusing_pairs(conf_matrix_normalized, class_names, 0.25)
+            confusing_pairs = [(a, b) for (a, b) in confusing_pairs if a != '-' and b != '-']
             print(confusing_pairs)
         else:
             confusing_pairs = []

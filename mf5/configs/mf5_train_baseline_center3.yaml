@@ -22,6 +22,7 @@ model:
   checkpoint: null
 
 loss:
+  mode: hybrid
   l1_weight: 1.0
   ssim_weight: 0.25
   ssim_window: 5
@@ -40,6 +41,12 @@ train:
   update_mode: avg5_once
   resume: null
   save_dir: ./save/mf5_baseline_center3
+  early_stop:
+    enabled: true
+    patience: 8
+    min_delta: 1.0e-4
+    min_epochs: 10
+    monitor: val_loss
 
 wandb:
   enabled: false

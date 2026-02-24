@@ -7,18 +7,23 @@ import kornia
 import losses
 import numpy as np
 import torch.nn as nn
-import tensorflow as tf
 import torch.nn.functional as F
 
 from PIL import Image
 from pathlib import Path
-from keras.models import Model
 from losses import register, make
 from kornia.losses import SSIMLoss
 from torchvision import transforms
 from torch.autograd import Variable
-from keras.models import model_from_json
-from tensorflow.keras.utils import img_to_array
+
+try:
+    import tensorflow as tf
+    from keras.models import model_from_json
+    from tensorflow.keras.utils import img_to_array
+except ModuleNotFoundError:
+    tf = None
+    model_from_json = None
+    img_to_array = None
 
 
 class strLabelConverter(object):
@@ -218,6 +223,11 @@ class OCR_perceptual_loss(nn.Module):
         
         # Check if GPUs are available using TensorFlow (TF)
         if self.load:
+            if tf is None or model_from_json is None or img_to_array is None:
+                raise ModuleNotFoundError(
+                    "TensorFlow/Keras is required when `loss_sr.args.load` is set. "
+                    "Set `load: null` to run without TensorFlow."
+                )
             gpus = tf.config.experimental.list_physical_devices('GPU')
     
             if gpus:
@@ -328,26 +338,30 @@ class OCR_perceptual_loss(nn.Module):
                     idx = self.converter.encode_char(char_gt)
                     weights[i][idx] += 0.5
         
-        pred1 = torch.chunk(pred1, pred1.size(1), 0)
+        # Compute CE per sample over sequence positions.
+        # pred1: [B, K, C], pred2: [B, K]
         loss1 = 0
-        for (i, item) in enumerate(pred1):
-            item = item.squeeze().cuda()
-            gt = pred2[i,:].cuda()
+        batch_size = pred1.size(0)
+        for i in range(batch_size):
+            item = pred1[i].cuda()      # [K, C]
+            gt = pred2[i, :].cuda()     # [K]
             loss_item = self.custom_cross_entropy(item, gt, weights=weights[i].cuda())
             loss1 += loss_item
-        loss1 = loss1/(i+1)
+        loss1 = loss1 / max(batch_size, 1)
         loss2 = self.loss2(im1, im2)
      
         return loss1 + loss2 + alpha*penalty
     
 def load_model(path):
-	with open(path + '/model.json', 'r') as f:
-		json = f.read()
+    if model_from_json is None:
+        raise ModuleNotFoundError("Keras is not available. Install TensorFlow/Keras or set `load: null`.")
+    with open(path + '/model.json', 'r') as f:
+        json = f.read()
 
-	model = model_from_json(json)
-	model.load_weights(path + '/weights.hdf5')
+    model = model_from_json(json)
+    model.load_weights(path + '/weights.hdf5')
         
-	return model
+    return model
 
 def padding(img, min_ratio, max_ratio, color = (0, 0, 0)):
     # Get the height and width of the input image

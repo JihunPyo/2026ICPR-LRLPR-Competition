@@ -1,0 +1,103 @@
+MODEL_OCR:
+  name: GPLPR
+  OCR_TRAIN: False
+  args:
+    alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    nc: 3
+    K: 7
+    isSeqModel: True
+    head: 2
+    inner: 256
+    isl2Norm: True
+
+optimizer_ocr:
+  name: adam
+  args:
+    lr: 1.e-4
+
+LOAD_PRE_TRAINED_OCR: "__PRETRAINED_OCR_CKPT__"
+LOAD_PRE_TRAINED_SR: "__PRETRAINED_SR_CKPT__"
+MODEL_SR:
+  name: cgnetV2_deformable
+  args:
+    in_channels: 3
+    out_channels: 3
+
+optimizer_sr:
+  name: adam
+  args:
+    lr: 1.e-4
+    betas: [0.5, 0.555]
+
+early_stopper:
+  patience: 50
+  min_delta: 0
+  counter: 0
+
+CM: True
+func_train: PARALLEL_TRAINING
+func_val: PARALLEL_VALIDATION
+alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+tag_view: view
+
+train_dataset:
+  dataset:
+    name: parallel_training
+    args:
+      # Runtime script overwrites this path to local staged split.
+      path_split: ./split_competition_preprocessed.txt
+      phase: training
+
+  wrapper:
+    name: parallel_images_lp
+    args:
+      imgW: 48
+      imgH: 16
+      aug: True
+      image_aspect_ratio: 3
+      background: (127, 127, 127)
+      preprocessed: True
+  batch: 2
+  num_workers: 8
+
+val_dataset:
+  dataset:
+    name: parallel_training
+    args:
+      path_split: ./split_competition_preprocessed.txt
+      phase: validation
+
+  wrapper:
+    name: parallel_images_lp
+    args:
+      imgW: 48
+      imgH: 16
+      aug: False
+      image_aspect_ratio: 3
+      background: (127, 127, 127)
+      preprocessed: True
+  batch: 2
+  num_workers: 8
+
+epoch_max: 3000
+
+loss_ocr:
+  name: CrossEntropyLoss
+  args:
+    size_average: None
+    reduce: None
+    reduction: mean
+
+loss_sr:
+  name: OCR_perceptual_loss
+  args:
+    alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ "
+    load: null
+    loss_weight: 0.75
+    loss_specs:
+      name: ssim_loss
+      args:
+        window_size: 5
+
+epoch_save: 100
+resume: null
